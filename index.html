@@ -7,10 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, doc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // Sử dụng cấu hình trực tiếp của bạn để đảm bảo chạy được trên Vercel
         const firebaseConfig = {
             apiKey: "AIzaSyBzYhkAdY03YN40A71OrIqh4qKGpN0YnBM",
             authDomain: "game-phan-loai.firebaseapp.com",
@@ -30,39 +29,36 @@
             window.db = db;
             window.auth = auth;
             window.appId = appId;
-            window.firestoreRefs = { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, doc, setDoc };
+            window.firestoreRefs = { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, doc, deleteDoc, writeBatch };
 
             const initAuth = async () => {
                 try {
-                    // SỬA LỖI: Kiểm tra tính hợp lệ của token trước khi sử dụng
-                    // Nếu token không tồn tại hoặc lỗi (như mismatch), chuyển sang đăng nhập ẩn danh ngay lập tức
                     let signedIn = false;
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         try {
                             await signInWithCustomToken(auth, __initial_auth_token);
                             signedIn = true;
                         } catch (tokenErr) {
-                            console.warn("Custom token failed, falling back to anonymous:", tokenErr);
+                            console.warn("Token mismatch, falling back to anonymous.");
                         }
                     }
+                    if (!signedIn) await signInAnonymously(auth);
                     
-                    if (!signedIn) {
-                        await signInAnonymously(auth);
+                    const statusEl = document.getElementById('db-status');
+                    if (statusEl) {
+                        statusEl.innerText = "🟢 Hệ thống đã sẵn sàng";
+                        statusEl.classList.replace('text-slate-400', 'text-green-500');
                     }
-
-                    document.getElementById('db-status').innerText = "🟢 Hệ thống đã sẵn sàng";
-                    document.getElementById('db-status').classList.replace('text-slate-400', 'text-green-500');
                 } catch (e) {
                     console.error("Auth Error:", e);
-                    document.getElementById('db-status').innerText = "🔴 Lỗi kết nối database";
-                    document.getElementById('db-status').classList.replace('text-slate-400', 'text-red-500');
                 }
             };
-            initAuth();
-
+            
             onAuthStateChanged(auth, (user) => {
                 if (user) loadGoldBoard();
             });
+
+            initAuth();
         } catch (err) { console.error("Init Error:", err); }
     </script>
     <style>
@@ -74,6 +70,8 @@
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
         .shake { animation: shake 0.4s ease-in-out; }
         .modal-open { overflow: hidden; }
+        .loading-spinner { border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 3px solid #fff; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; vertical-align: middle; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="p-4 md:p-8 min-h-screen">
@@ -87,14 +85,17 @@
                        class="w-full p-4 border-2 border-slate-100 rounded-xl mb-4 focus:border-indigo-500 outline-none text-center font-bold text-lg transition-all">
                 <button onclick="startGame()" class="w-full py-4 bg-indigo-600 text-white rounded-xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all mb-3">Vào chơi ngay</button>
                 <button onclick="toggleLeaderboard(true)" class="w-full py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-50 transition-all uppercase tracking-wider">Xem Bảng Vàng</button>
-                <div id="db-status" class="mt-6 text-[10px] font-bold uppercase tracking-widest text-slate-400 italic">Đang kết nối...</div>
+                <div id="db-status" onclick="openAdminPanel()" class="mt-6 text-[10px] font-bold uppercase tracking-widest text-slate-400 italic cursor-pointer hover:text-indigo-400 transition-colors">Đang kết nối...</div>
             </div>
         </div>
 
         <header class="flex justify-between items-center mb-8 pb-4 border-b border-slate-200">
             <div>
                 <h2 class="text-xl font-black text-slate-800" id="user-display">Kinh tế học</h2>
-                <button onclick="toggleLeaderboard(true)" class="text-[10px] text-indigo-600 font-bold uppercase tracking-widest hover:underline mt-1">🏆 Xem xếp hạng hiện tại</button>
+                <div class="flex gap-4">
+                    <button onclick="toggleLeaderboard(true)" class="text-[10px] text-indigo-600 font-bold uppercase tracking-widest hover:underline mt-1">🏆 Xem xếp hạng</button>
+                    <button onclick="openAdminPanel()" class="text-[10px] text-slate-400 font-bold uppercase tracking-widest hover:text-red-500 mt-1">⚙️ Quản trị</button>
+                </div>
             </div>
             <div class="bg-white px-5 py-2 rounded-2xl shadow-sm border border-slate-100">
                 <div class="text-2xl font-mono font-black text-indigo-600" id="timer">00:00</div>
@@ -109,9 +110,7 @@
                 </div>
                 <div id="pool" class="flex flex-wrap gap-2 justify-center min-h-[100px]"></div>
             </div>
-
             <div id="zones" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"></div>
-
             <div class="flex flex-col items-center gap-4">
                 <button id="check-btn" class="px-12 py-5 bg-slate-900 text-white font-black rounded-2xl uppercase text-xs tracking-[0.2em] hover:bg-slate-800 transition-all shadow-xl active:scale-95">Kiểm tra đáp án</button>
                 <button id="save-btn" class="hidden px-12 py-5 bg-amber-500 text-white font-black rounded-2xl uppercase text-xs tracking-[0.2em] animate-bounce shadow-xl active:scale-95">Lưu Kỷ Lục</button>
@@ -132,15 +131,35 @@
                 </div>
                 <div class="max-h-[60vh] overflow-y-auto">
                     <table class="w-full text-left">
-                        <tbody id="board-rows" class="divide-y divide-slate-50">
-                            <!-- Dữ liệu từ Firebase -->
-                        </tbody>
+                        <tbody id="board-rows" class="divide-y divide-slate-50"></tbody>
                     </table>
                 </div>
-                <div class="p-6 bg-slate-50 text-center">
-                    <p class="text-[10px] text-slate-400 font-bold uppercase mb-4 italic">Bảng vàng tự động cập nhật khi có sinh viên mới hoàn thành</p>
-                    <button onclick="toggleLeaderboard(false)" class="px-8 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-100">Quay lại trò chơi</button>
+                <div class="p-6 bg-slate-50 text-center flex flex-col gap-3">
+                    <p class="text-[10px] text-slate-400 font-bold uppercase italic">Bảng vàng tự động cập nhật khi có sinh viên mới hoàn thành</p>
+                    <div class="flex gap-2 justify-center">
+                        <button onclick="toggleLeaderboard(false)" class="px-8 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg">Đóng</button>
+                    </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Admin Modal -->
+        <div id="admin-modal" class="hidden fixed inset-0 z-[70] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl border border-slate-100">
+                <h3 class="text-xl font-black text-slate-800 mb-4 text-center">⚙️ Khu vực Giáo viên</h3>
+                <div id="admin-auth-view">
+                    <p class="text-slate-500 text-sm mb-4 text-center">Vui lòng nhập mật mã quản trị để tiếp tục.</p>
+                    <input type="password" id="admin-pass" placeholder="Mật mã..." class="w-full p-4 border-2 border-slate-100 rounded-xl mb-4 focus:border-red-500 outline-none text-center">
+                    <button onclick="checkAdminPass()" class="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-lg hover:bg-slate-700 active:scale-95 transition-all">Xác nhận</button>
+                </div>
+                <div id="admin-actions-view" class="hidden">
+                    <p class="text-red-500 text-[10px] font-black uppercase mb-6 text-center tracking-widest">⚠️ CẢNH BÁO: HÀNH ĐỘNG KHÔNG THỂ HOÀN TÁC</p>
+                    <button id="clear-board-btn" onclick="clearLeaderboard()" class="w-full py-4 bg-red-600 text-white rounded-xl font-black shadow-lg hover:bg-red-700 transition-all mb-4 flex items-center justify-center">
+                        <span id="clear-btn-text">XÓA SẠCH BẢNG VÀNG</span>
+                    </button>
+                    <p class="text-slate-400 text-[10px] text-center mb-6 font-medium">Xóa toàn bộ kết quả để bắt đầu lượt chơi cho lớp mới.</p>
+                </div>
+                <button onclick="closeAdminPanel()" class="w-full py-2 text-slate-400 font-bold text-xs uppercase tracking-widest mt-2 hover:text-slate-600 transition-colors">Hủy bỏ</button>
             </div>
         </div>
     </div>
@@ -156,15 +175,74 @@
         };
 
         let playerName = ""; let startTime = null; let dragged = null; let timerInt = null;
+        const ADMIN_PASSWORD = "01026018";
 
         function toggleLeaderboard(show) {
             const modal = document.getElementById('leaderboard-modal');
             if (show) {
                 modal.classList.remove('hidden');
                 document.body.classList.add('modal-open');
+                loadGoldBoard();
             } else {
                 modal.classList.add('hidden');
                 document.body.classList.remove('modal-open');
+            }
+        }
+
+        function openAdminPanel() {
+            document.getElementById('admin-modal').classList.remove('hidden');
+            document.getElementById('admin-pass').value = "";
+            document.getElementById('admin-auth-view').classList.remove('hidden');
+            document.getElementById('admin-actions-view').classList.add('hidden');
+        }
+
+        function closeAdminPanel() {
+            document.getElementById('admin-modal').classList.add('hidden');
+        }
+
+        function checkAdminPass() {
+            const val = document.getElementById('admin-pass').value;
+            if (val === ADMIN_PASSWORD) {
+                document.getElementById('admin-auth-view').classList.add('hidden');
+                document.getElementById('admin-actions-view').classList.remove('hidden');
+            } else {
+                alert("Mật mã quản trị không đúng!");
+            }
+        }
+
+        async function clearLeaderboard() {
+            if (!confirm("Thầy/cô có chắc chắn muốn xóa vĩnh viễn toàn bộ bảng xếp hạng không?")) return;
+            
+            const btn = document.getElementById('clear-board-btn');
+            const btnText = document.getElementById('clear-btn-text');
+            
+            btn.disabled = true;
+            btn.classList.add('opacity-70', 'cursor-not-allowed');
+            btnText.innerHTML = `<span class="loading-spinner"></span> ĐANG XÓA...`;
+
+            try {
+                const { db, firestoreRefs, appId } = window;
+                const historyCol = firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history');
+                const qSnap = await firestoreRefs.getDocs(historyCol);
+                
+                if (qSnap.empty) {
+                    alert("Bảng vàng hiện đang trống, không có gì để xóa.");
+                } else {
+                    const batch = firestoreRefs.writeBatch(db);
+                    qSnap.docs.forEach((d) => batch.delete(d.ref));
+                    await batch.commit();
+                    alert("Đã xóa sạch bảng vàng thành công!");
+                }
+                
+                closeAdminPanel();
+                loadGoldBoard();
+            } catch (e) {
+                console.error("Delete Error:", e);
+                alert("Lỗi khi xóa: " + e.message + "\n\nLưu ý: Thầy/cô hãy kiểm tra lại Rules trong Firebase Console đã cho phép quyền 'delete' chưa.");
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
+                btnText.innerText = "XÓA SẠCH BẢNG VÀNG";
             }
         }
 
@@ -250,69 +328,50 @@
         document.getElementById('save-btn').onclick = async () => {
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
             const timeStr = document.getElementById('timer').innerText;
-            
             if (window.auth && window.auth.currentUser) {
                 const { db, firestoreRefs, appId } = window;
                 try {
                     const historyCol = firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history');
                     await firestoreRefs.addDoc(historyCol, {
-                        name: playerName, 
-                        time: timeStr, 
-                        sec: elapsed, 
-                        at: firestoreRefs.serverTimestamp()
+                        name: playerName, time: timeStr, sec: elapsed, 
+                        at: firestoreRefs.serverTimestamp(), uid: window.auth.currentUser.uid
                     });
-                    
                     toggleLeaderboard(true);
-                    
                     document.getElementById('game-ui').innerHTML = `
                         <div class="bg-white p-12 rounded-[2.5rem] border border-slate-100 shadow-xl text-center">
                             <div class="mb-4 text-5xl">🏆</div>
-                            <h3 class="text-2xl font-black text-slate-800 mb-2">Chúc mừng em đã hoàn thành!</h3>
-                            <p class="text-slate-500 mb-8 font-medium">Kết quả của em đã được lưu vào Bảng Vàng.</p>
-                            <button onclick="location.reload()" class="px-8 py-3 bg-slate-900 text-white rounded-xl font-bold uppercase tracking-widest text-xs">Chơi lại lần nữa</button>
+                            <h3 class="text-2xl font-black text-slate-800 mb-2">Chúc mừng em!</h3>
+                            <button onclick="location.reload()" class="px-8 py-3 bg-slate-900 text-white rounded-xl font-bold uppercase text-xs">Chơi lại</button>
                         </div>
                     `;
-                } catch (e) {
-                    console.error("Save Error:", e);
-                    alert("Lỗi lưu điểm: " + e.message);
-                }
-            } else {
-                alert("Đang kết nối hệ thống, vui lòng đợi giây lát rồi bấm lại.");
+                } catch (e) { alert("Lỗi lưu: " + e.message); }
             }
         };
 
         function loadGoldBoard() {
-            if (!window.db || !window.auth.currentUser) return;
+            if (!window.db || !window.auth || !window.auth.currentUser) return;
             const { db, firestoreRefs, appId } = window;
+            const historyCol = firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history');
             
-            const q = firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history');
-            
-            firestoreRefs.onSnapshot(q, (snap) => {
+            firestoreRefs.onSnapshot(historyCol, (snap) => {
                 const sortedDocs = snap.docs
                     .map(doc => doc.data())
+                    .filter(i => i.name && i.sec)
                     .sort((a, b) => (a.sec || 999) - (b.sec || 999));
 
                 const rows = sortedDocs.slice(0, 15).map((item, i) => {
                     const isMe = item.name === playerName;
                     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1;
                     return `
-                        <tr class="border-b border-slate-50 transition-colors ${isMe ? 'bg-indigo-50/50' : ''}">
+                        <tr class="border-b border-slate-50 ${isMe ? 'bg-indigo-50/50' : ''}">
                             <td class="p-5 font-black text-slate-300 w-16 text-center text-lg">${medal}</td>
-                            <td class="p-5 font-bold text-slate-700">
-                                ${item.name}
-                                ${isMe ? '<span class="ml-2 text-[8px] bg-indigo-600 text-white px-1.5 py-0.5 rounded uppercase">Của bạn</span>' : ''}
-                            </td>
+                            <td class="p-5 font-bold text-slate-700">${item.name}</td>
                             <td class="p-5 text-right font-mono font-black text-indigo-600">${item.time}</td>
                         </tr>
                     `;
                 }).join('');
-                
-                document.getElementById('board-rows').innerHTML = rows || `
-                    <tr><td class="p-12 text-center text-slate-400 italic font-medium">Chưa có ai ghi danh. Hãy là người đầu tiên!</td></tr>
-                `;
-            }, (err) => {
-                console.error("Firebase Error:", err);
-                document.getElementById('board-rows').innerHTML = `<tr><td class="p-10 text-center text-red-400">Lỗi: ${err.message}</td></tr>`;
+                const el = document.getElementById('board-rows');
+                if (el) el.innerHTML = rows || `<tr><td class="p-12 text-center text-slate-400 italic">Bảng vàng trống.</td></tr>`;
             });
         }
     </script>
