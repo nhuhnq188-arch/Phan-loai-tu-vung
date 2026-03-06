@@ -10,8 +10,17 @@
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'economics_game';
+        // Sử dụng cấu hình trực tiếp của bạn để đảm bảo chạy được trên Vercel
+        const firebaseConfig = {
+            apiKey: "AIzaSyBzYhkAdY03YN40A71OrIqh4qKGpN0YnBM",
+            authDomain: "game-phan-loai.firebaseapp.com",
+            projectId: "game-phan-loai",
+            storageBucket: "game-phan-loai.firebasestorage.app",
+            messagingSenderId: "916490432151",
+            appId: "1:916490432151:web:d6081da627ebd50ca2c3d2"
+        };
+
+        const appId = 'economics_game';
 
         try {
             const app = initializeApp(firebaseConfig);
@@ -25,14 +34,26 @@
 
             const initAuth = async () => {
                 try {
+                    // SỬA LỖI: Kiểm tra tính hợp lệ của token trước khi sử dụng
+                    // Nếu token không tồn tại hoặc lỗi (như mismatch), chuyển sang đăng nhập ẩn danh ngay lập tức
+                    let signedIn = false;
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else {
+                        try {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                            signedIn = true;
+                        } catch (tokenErr) {
+                            console.warn("Custom token failed, falling back to anonymous:", tokenErr);
+                        }
+                    }
+                    
+                    if (!signedIn) {
                         await signInAnonymously(auth);
                     }
+
                     document.getElementById('db-status').innerText = "🟢 Hệ thống đã sẵn sàng";
                     document.getElementById('db-status').classList.replace('text-slate-400', 'text-green-500');
                 } catch (e) {
+                    console.error("Auth Error:", e);
                     document.getElementById('db-status').innerText = "🔴 Lỗi kết nối database";
                     document.getElementById('db-status').classList.replace('text-slate-400', 'text-red-500');
                 }
@@ -42,7 +63,7 @@
             onAuthStateChanged(auth, (user) => {
                 if (user) loadGoldBoard();
             });
-        } catch (err) { console.error(err); }
+        } catch (err) { console.error("Init Error:", err); }
     </script>
     <style>
         body { background-color: #f8fafc; touch-action: manipulation; font-family: system-ui, -apple-system, sans-serif; }
@@ -182,7 +203,8 @@
 
         function updateCount() {
             const num = document.getElementById('pool').children.length;
-            document.getElementById('count-tag').innerText = num > 0 ? `Còn ${num} từ` : "Xong!";
+            const tag = document.getElementById('count-tag');
+            if (tag) tag.innerText = num > 0 ? `Còn ${num} từ` : "Xong!";
         }
 
         function initDnd() {
@@ -228,13 +250,20 @@
         document.getElementById('save-btn').onclick = async () => {
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
             const timeStr = document.getElementById('timer').innerText;
-            if (window.auth.currentUser) {
+            
+            if (window.auth && window.auth.currentUser) {
                 const { db, firestoreRefs, appId } = window;
                 try {
-                    await firestoreRefs.addDoc(firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history'), {
-                        name: playerName, time: timeStr, sec: elapsed, at: firestoreRefs.serverTimestamp()
+                    const historyCol = firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history');
+                    await firestoreRefs.addDoc(historyCol, {
+                        name: playerName, 
+                        time: timeStr, 
+                        sec: elapsed, 
+                        at: firestoreRefs.serverTimestamp()
                     });
+                    
                     toggleLeaderboard(true);
+                    
                     document.getElementById('game-ui').innerHTML = `
                         <div class="bg-white p-12 rounded-[2.5rem] border border-slate-100 shadow-xl text-center">
                             <div class="mb-4 text-5xl">🏆</div>
@@ -244,8 +273,11 @@
                         </div>
                     `;
                 } catch (e) {
-                    alert("Lỗi lưu điểm. Vui lòng kiểm tra kết nối mạng.");
+                    console.error("Save Error:", e);
+                    alert("Lỗi lưu điểm: " + e.message);
                 }
+            } else {
+                alert("Đang kết nối hệ thống, vui lòng đợi giây lát rồi bấm lại.");
             }
         };
 
@@ -253,11 +285,9 @@
             if (!window.db || !window.auth.currentUser) return;
             const { db, firestoreRefs, appId } = window;
             
-            // QUAN TRỌNG: Không dùng orderBy trong query để tránh lỗi Rules thiếu Index
             const q = firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history');
             
             firestoreRefs.onSnapshot(q, (snap) => {
-                // Sắp xếp dữ liệu trong bộ nhớ (Memory) thay vì dùng query phức tạp
                 const sortedDocs = snap.docs
                     .map(doc => doc.data())
                     .sort((a, b) => (a.sec || 999) - (b.sec || 999));
@@ -281,8 +311,8 @@
                     <tr><td class="p-12 text-center text-slate-400 italic font-medium">Chưa có ai ghi danh. Hãy là người đầu tiên!</td></tr>
                 `;
             }, (err) => {
-                console.error("Firebase Error Details:", err);
-                document.getElementById('board-rows').innerHTML = `<tr><td class="p-10 text-center text-red-400">Không thể tải dữ liệu (Lỗi Rules Firestore)</td></tr>`;
+                console.error("Firebase Error:", err);
+                document.getElementById('board-rows').innerHTML = `<tr><td class="p-10 text-center text-red-400">Lỗi: ${err.message}</td></tr>`;
             });
         }
     </script>
