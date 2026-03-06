@@ -19,7 +19,7 @@
             appId: "1:916490432151:web:d6081da627ebd50ca2c3d2"
         };
 
-        const appId = 'group-sort-economics-final';
+        const appId = 'economics_game';
 
         try {
             const app = initializeApp(firebaseConfig);
@@ -31,12 +31,12 @@
             window.appId = appId;
             window.firestoreRefs = { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, doc, setDoc };
 
-            signInAnonymously(auth).then(() => {
-                document.getElementById('db-status').innerText = "🟢 Đã kết nối hệ thống";
-                document.getElementById('db-status').classList.add('text-green-500');
+            signInAnonymously(auth).then(async () => {
+                document.getElementById('db-status').innerText = "🟢 Hệ thống đã sẵn sàng";
+                document.getElementById('db-status').classList.replace('text-slate-400', 'text-green-500');
             }).catch(e => {
-                document.getElementById('db-status').innerText = "🔴 Lỗi kết nối (Cần bật Anonymous Auth)";
-                document.getElementById('db-status').classList.add('text-red-500');
+                document.getElementById('db-status').innerText = "🔴 Lỗi kết nối database";
+                document.getElementById('db-status').classList.replace('text-slate-400', 'text-red-500');
             });
 
             onAuthStateChanged(auth, (user) => {
@@ -46,50 +46,81 @@
     </script>
     <style>
         body { background-color: #f8fafc; touch-action: manipulation; font-family: system-ui, -apple-system, sans-serif; }
-        .item-card { transition: all 0.2s ease; cursor: grab; user-select: none; touch-action: none; }
+        .item-card { transition: all 0.2s ease; cursor: grab; user-select: none; touch-action: none; position: relative; z-index: 10; }
         .item-card:active { cursor: grabbing; transform: scale(1.05); z-index: 50; }
         .drop-active { border-color: #6366f1 !important; background-color: #f5f3ff; }
         .correct { border-color: #10b981 !important; background-color: #f0fdf4 !important; pointer-events: none; opacity: 0.6; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
         .shake { animation: shake 0.4s ease-in-out; }
+        .modal-open { overflow: hidden; }
     </style>
 </head>
 <body class="p-4 md:p-8 min-h-screen">
     <div class="max-w-6xl mx-auto">
         <!-- Màn hình chờ nhập tên -->
         <div id="login-overlay" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6">
-            <div class="bg-white w-full max-w-sm rounded-[2rem] p-8 text-center shadow-2xl">
+            <div class="bg-white w-full max-w-sm rounded-[2rem] p-8 text-center shadow-2xl border border-white/10">
                 <h1 class="text-2xl font-black text-slate-800 mb-2">Học phần Kinh tế</h1>
-                <p class="text-slate-500 mb-6 text-sm">Nhập tên để bắt đầu bài học</p>
+                <p class="text-slate-500 mb-6 text-sm font-medium">Nhập tên để bắt đầu bài học</p>
                 <input type="text" id="player-name" placeholder="Họ và tên của em..." 
-                       class="w-full p-4 border-2 border-slate-100 rounded-xl mb-4 focus:border-indigo-500 outline-none text-center font-bold text-lg">
-                <button onclick="startGame()" class="w-full py-4 bg-indigo-600 text-white rounded-xl font-black shadow-lg hover:bg-indigo-700 transition-all">Vào học ngay</button>
-                <div id="db-status" class="mt-6 text-[10px] font-bold uppercase tracking-widest text-slate-400 italic">Đang kiểm tra kết nối...</div>
+                       class="w-full p-4 border-2 border-slate-100 rounded-xl mb-4 focus:border-indigo-500 outline-none text-center font-bold text-lg transition-all">
+                <button onclick="startGame()" class="w-full py-4 bg-indigo-600 text-white rounded-xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all mb-3">Vào chơi ngay</button>
+                <button onclick="toggleLeaderboard(true)" class="w-full py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-50 transition-all uppercase tracking-wider">Xem Bảng Vàng</button>
+                <div id="db-status" class="mt-6 text-[10px] font-bold uppercase tracking-widest text-slate-400 italic">Đang kết nối...</div>
             </div>
         </div>
 
-        <header class="flex justify-between items-center mb-8 pb-4 border-b">
-            <h2 class="text-xl font-black text-slate-800" id="user-display">Kinh tế học</h2>
-            <div class="text-2xl font-mono font-black text-indigo-600" id="timer">00:00</div>
+        <header class="flex justify-between items-center mb-8 pb-4 border-b border-slate-200">
+            <div>
+                <h2 class="text-xl font-black text-slate-800" id="user-display">Kinh tế học</h2>
+                <button onclick="toggleLeaderboard(true)" class="text-[10px] text-indigo-600 font-bold uppercase tracking-widest hover:underline mt-1">🏆 Xem xếp hạng hiện tại</button>
+            </div>
+            <div class="bg-white px-5 py-2 rounded-2xl shadow-sm border border-slate-100">
+                <div class="text-2xl font-mono font-black text-indigo-600" id="timer">00:00</div>
+            </div>
         </header>
 
         <div id="game-ui" class="hidden">
-            <div class="bg-white p-6 rounded-3xl border mb-6 shadow-sm">
+            <div class="bg-white p-6 rounded-3xl border border-slate-100 mb-6 shadow-sm">
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-[10px] font-black uppercase text-slate-400 tracking-widest font-bold">Danh sách thuật ngữ</span>
+                    <span id="count-tag" class="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md uppercase"></span>
+                </div>
                 <div id="pool" class="flex flex-wrap gap-2 justify-center min-h-[100px]"></div>
             </div>
+
             <div id="zones" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"></div>
-            <div class="flex justify-center gap-4">
-                <button id="check-btn" class="px-8 py-4 bg-slate-900 text-white font-black rounded-xl uppercase text-xs tracking-widest">Kiểm tra kết quả</button>
-                <button id="save-btn" class="hidden px-8 py-4 bg-amber-500 text-white font-black rounded-xl uppercase text-xs tracking-widest animate-bounce">Ghi danh Bảng Vàng</button>
+
+            <div class="flex flex-col items-center gap-4">
+                <button id="check-btn" class="px-12 py-5 bg-slate-900 text-white font-black rounded-2xl uppercase text-xs tracking-[0.2em] hover:bg-slate-800 transition-all shadow-xl active:scale-95">Kiểm tra đáp án</button>
+                <button id="save-btn" class="hidden px-12 py-5 bg-amber-500 text-white font-black rounded-2xl uppercase text-xs tracking-[0.2em] animate-bounce shadow-xl active:scale-95">Lưu Kỷ Lục</button>
             </div>
         </div>
 
-        <div id="leaderboard-ui" class="hidden max-w-xl mx-auto mt-4 bg-white rounded-3xl overflow-hidden shadow-xl border">
-            <div class="bg-amber-400 p-6 text-center text-white font-black uppercase tracking-widest">Bảng Vàng Danh Dự</div>
-            <table class="w-full text-left">
-                <tbody id="board-rows" class="divide-y"></tbody>
-            </table>
-            <div class="p-6 text-center"><button onclick="location.reload()" class="text-indigo-600 font-bold text-sm">CHƠI LẠI</button></div>
+        <!-- Bảng Vàng Modal -->
+        <div id="leaderboard-modal" class="hidden fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div class="bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+                <div class="bg-amber-400 p-6 flex justify-between items-center">
+                    <div class="text-white">
+                        <h3 class="text-xl font-black uppercase tracking-tighter">Bảng Vàng Danh Dự</h3>
+                        <p class="text-amber-100 text-[10px] font-bold uppercase tracking-widest">Cập nhật trực tuyến</p>
+                    </div>
+                    <button onclick="toggleLeaderboard(false)" class="bg-white/20 hover:bg-white/40 p-2 rounded-full text-white transition-all">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+                <div class="max-h-[60vh] overflow-y-auto">
+                    <table class="w-full text-left">
+                        <tbody id="board-rows" class="divide-y divide-slate-50">
+                            <!-- Dữ liệu từ Firebase -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="p-6 bg-slate-50 text-center">
+                    <p class="text-[10px] text-slate-400 font-bold uppercase mb-4 italic">Bảng vàng tự động cập nhật khi có sinh viên mới hoàn thành</p>
+                    <button onclick="toggleLeaderboard(false)" class="px-8 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-100">Quay lại trò chơi</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -105,12 +136,26 @@
 
         let playerName = ""; let startTime = null; let dragged = null; let timerInt = null;
 
+        function toggleLeaderboard(show) {
+            const modal = document.getElementById('leaderboard-modal');
+            if (show) {
+                modal.classList.remove('hidden');
+                document.body.classList.add('modal-open');
+            } else {
+                modal.classList.add('hidden');
+                document.body.classList.remove('modal-open');
+            }
+        }
+
         function startGame() {
             playerName = document.getElementById('player-name').value.trim();
             if (playerName.length < 2) return document.getElementById('player-name').classList.add('shake');
             document.getElementById('login-overlay').style.display = 'none';
             document.getElementById('game-ui').classList.remove('hidden');
-            document.getElementById('user-display').innerText = `Sinh viên: ${playerName}`;
+            document.getElementById('user-display').innerHTML = `
+                <div class="text-xs text-slate-400 font-bold uppercase tracking-widest">Đang chơi</div>
+                <div class="text-lg font-black text-slate-800">${playerName}</div>
+            `;
             startTime = Date.now();
             timerInt = setInterval(() => {
                 const sec = Math.floor((Date.now() - startTime) / 1000);
@@ -123,15 +168,21 @@
             const zones = document.getElementById('zones');
             const pool = document.getElementById('pool');
             zones.innerHTML = data.cats.map(c => `
-                <div class="bg-white rounded-2xl border-2 flex flex-col min-h-[250px]">
+                <div class="bg-white rounded-[2rem] border-2 border-slate-100 flex flex-col min-h-[250px] shadow-sm transition-all overflow-hidden">
                     <div class="bg-slate-50 p-3 text-center text-[10px] font-black uppercase text-slate-400 border-b tracking-widest">${c.n}</div>
                     <div class="zone-drop p-4 flex-grow flex flex-wrap gap-2 content-start" data-cid="${c.id}"></div>
                 </div>
             `).join('');
             pool.innerHTML = [...data.items].sort(() => Math.random() - 0.5).map((i, idx) => `
-                <div class="item-card px-3 py-2 bg-white border rounded-lg shadow-sm text-sm font-bold text-slate-700" draggable="true" data-correct="${i.c}">${i.t}</div>
+                <div class="item-card px-4 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm text-sm font-bold text-slate-700 hover:border-indigo-400 hover:shadow-md" draggable="true" data-correct="${i.c}">${i.t}</div>
             `).join('');
             initDnd();
+            updateCount();
+        }
+
+        function updateCount() {
+            const num = document.getElementById('pool').children.length;
+            document.getElementById('count-tag').innerText = num > 0 ? `Còn ${num} từ` : "Xong!";
         }
 
         function initDnd() {
@@ -144,14 +195,14 @@
                 el.ontouchend = (e) => {
                     const t = e.changedTouches[0];
                     const target = document.elementFromPoint(t.clientX, t.clientY)?.closest('.zone-drop, #pool');
-                    if (target && dragged) target.appendChild(dragged);
+                    if (target && dragged) { target.appendChild(dragged); updateCount(); }
                     dragged = null;
                 };
             });
             targets.forEach(t => {
                 t.ondragover = (e) => { e.preventDefault(); t.classList.add('drop-active'); };
                 t.ondragleave = () => t.classList.remove('drop-active');
-                t.ondrop = (e) => { e.preventDefault(); t.classList.remove('drop-active'); if (dragged) t.appendChild(dragged); };
+                t.ondrop = (e) => { e.preventDefault(); t.classList.remove('drop-active'); if (dragged) { t.appendChild(dragged); updateCount(); } };
             });
         }
 
@@ -166,6 +217,7 @@
                     el.classList.add('shake'); setTimeout(() => el.classList.remove('shake'), 400);
                 }
             });
+            updateCount();
             if (correct === data.items.length) {
                 clearInterval(timerInt);
                 document.getElementById('check-btn').classList.add('hidden');
@@ -176,29 +228,58 @@
         document.getElementById('save-btn').onclick = async () => {
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
             const timeStr = document.getElementById('timer').innerText;
-            document.getElementById('game-ui').classList.add('hidden');
-            document.getElementById('leaderboard-ui').classList.remove('hidden');
             if (window.db) {
                 const { db, firestoreRefs, appId } = window;
-                await firestoreRefs.addDoc(firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history'), {
-                    name: playerName, time: timeStr, sec: elapsed, at: firestoreRefs.serverTimestamp()
-                });
+                try {
+                    await firestoreRefs.addDoc(firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history'), {
+                        name: playerName, time: timeStr, sec: elapsed, at: firestoreRefs.serverTimestamp()
+                    });
+                    toggleLeaderboard(true);
+                    document.getElementById('game-ui').innerHTML = `
+                        <div class="bg-white p-12 rounded-[2.5rem] border border-slate-100 shadow-xl text-center">
+                            <div class="mb-4 text-5xl">🏆</div>
+                            <h3 class="text-2xl font-black text-slate-800 mb-2">Chúc mừng em đã hoàn thành!</h3>
+                            <p class="text-slate-500 mb-8 font-medium">Kết quả của em đã được lưu vào Bảng Vàng.</p>
+                            <button onclick="location.reload()" class="px-8 py-3 bg-slate-900 text-white rounded-xl font-bold uppercase tracking-widest text-xs">Chơi lại lần nữa</button>
+                        </div>
+                    `;
+                } catch (e) {
+                    alert("Lỗi lưu điểm. Vui lòng kiểm tra kết nối mạng.");
+                }
             }
         };
 
         function loadGoldBoard() {
             if (!window.db) return;
             const { db, firestoreRefs, appId } = window;
-            const q = firestoreRefs.query(firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history'), firestoreRefs.orderBy('sec', 'asc'));
+            const q = firestoreRefs.query(
+                firestoreRefs.collection(db, 'artifacts', appId, 'public', 'data', 'history'), 
+                firestoreRefs.orderBy('sec', 'asc')
+            );
+            
             firestoreRefs.onSnapshot(q, (snap) => {
-                document.getElementById('board-rows').innerHTML = snap.docs.slice(0, 10).map((d, i) => {
+                const rows = snap.docs.slice(0, 15).map((d, i) => {
                     const item = d.data();
-                    return `<tr class="border-b ${item.name === playerName ? 'bg-amber-50' : ''}">
-                        <td class="p-4 font-black text-slate-400 w-12 text-center">${i+1}</td>
-                        <td class="p-4 font-bold text-slate-700">${item.name}</td>
-                        <td class="p-4 text-right font-mono font-black text-indigo-600">${item.time}</td>
-                    </tr>`;
-                }).join('') || '<tr><td class="p-10 text-center text-slate-400">Chưa có dữ liệu</td></tr>';
+                    const isMe = item.name === playerName;
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1;
+                    return `
+                        <tr class="border-b border-slate-50 transition-colors ${isMe ? 'bg-indigo-50/50' : ''}">
+                            <td class="p-5 font-black text-slate-300 w-16 text-center text-lg">${medal}</td>
+                            <td class="p-5 font-bold text-slate-700">
+                                ${item.name}
+                                ${isMe ? '<span class="ml-2 text-[8px] bg-indigo-600 text-white px-1.5 py-0.5 rounded uppercase">Của bạn</span>' : ''}
+                            </td>
+                            <td class="p-5 text-right font-mono font-black text-indigo-600">${item.time}</td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                document.getElementById('board-rows').innerHTML = rows || `
+                    <tr><td class="p-12 text-center text-slate-400 italic font-medium">Chưa có ai ghi danh. Hãy là người đầu tiên!</td></tr>
+                `;
+            }, (err) => {
+                console.error("Firebase Error:", err);
+                document.getElementById('board-rows').innerHTML = `<tr><td class="p-10 text-center text-red-400">Không thể tải dữ liệu (Lỗi Rules)</td></tr>`;
             });
         }
     </script>
